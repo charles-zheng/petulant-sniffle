@@ -1,0 +1,514 @@
+import java.awt.Color;
+import java.util.ArrayList;
+import java.util.HashMap;
+
+import javalib.colors.*;
+import javalib.impworld.*;
+import javalib.worldimages.*;
+import javalib.worldcanvas.*;
+import tester.*;
+
+// Sydney Hubbell
+// hubbesy
+// Charles Zheng
+// charlesz
+
+class MazeWorld extends World {
+
+    static boolean ANIMATE = true;
+    static boolean STEPPER = false;
+
+    Maze maze;
+    Player player;
+    boolean gameover;
+    boolean depth;
+    boolean breadth;
+    boolean play;
+    ArrayList<Node> nodelist;
+    ArrayList<Edge> path;
+
+    MazeWorld() {
+        this.maze = new Maze();
+        this.player = new Player(this.maze.nodes.get(0).get(0));
+        this.gameover = false;
+        this.depth = false;
+        this.breadth = false;
+        this.play = true;
+        this.nodelist = new ArrayList<Node>();
+        this.nodelist.add(this.maze.nodes.get(0).get(0));
+        this.path = new ArrayList<Edge>();
+    }
+
+    public WorldImage makeImage() {
+        int height = Node.SIZE * Maze.HEIGHT;
+        int width = Node.SIZE * Maze.WIDTH;
+        WorldImage result = this.maze.draw();
+
+        if (!this.gameover) {
+            if (this.play) {
+                result = this.player.drawAt(result);
+            }
+            if (this.breadth) {
+                for (Node n : this.nodelist) {
+                    result = new OverlayImages(result, n.drawHead());
+                }
+            }
+            if (this.depth) {
+                result = new OverlayImages(result, this.nodelist.get(0)
+                        .drawHead());
+            }
+        } 
+        else {
+            for (Edge e : this.path) {
+                result = new OverlayImages(result, e.draw());
+            }
+            result = result.overlayImages(new TextImage(new Posn(width / 2,
+                    height / 2), "YOU WIN!", 40, new Red()));
+            if (!this.play) {
+                result = result.overlayImages(new TextImage(new Posn(width / 2,
+                        (height / 2) + 50), "Score: "
+                        + Integer.toString(this.maze.score()) + "%", 40,
+                        new Red()));
+            }
+        }
+        return result;
+    }
+
+    public void onTick() {
+        if (MazeWorld.ANIMATE) {
+            this.maze.createByStep();
+        }
+        if (this.player.loc.x == Maze.WIDTH - 1
+                && this.player.loc.y == Maze.HEIGHT - 1) {
+            this.gameover = true;
+        }
+        if (!this.gameover && !this.play) {
+            this.search();
+        }
+    }
+
+    public void onKeyEvent(String s) {
+        if (MazeWorld.STEPPER && s.equals("s")) {
+            this.maze.createByStep();
+        }
+        if (s.equals("d") || s.equals("b") || s.equals("p")) {
+            this.maze = new Maze();
+            this.gameover = false;
+            this.nodelist = new ArrayList<Node>();
+            this.nodelist.add(this.maze.nodes.get(0).get(0));
+            this.path = new ArrayList<Edge>();
+        }
+        if (s.equals("d")) {
+            this.depth = true;
+            this.breadth = false;
+            this.play = false;
+        }
+        if (s.equals("b")) {
+            this.depth = false;
+            this.breadth = true;
+            this.play = false;
+        }
+        if (s.equals("p")) {
+            this.depth = false;
+            this.breadth = false;
+            this.play = true;
+            this.player = new Player(this.maze.nodes.get(0).get(0));
+        }
+        if (this.play) {
+            if (!this.gameover) {
+                if (s.equals("up")
+                        && this.maze.hasEdge(this.player.loc,
+                                this.player.loc.top)) {
+                    this.player.loc = this.player.loc.top;
+                }
+                if (s.equals("down")
+                        && this.maze.hasEdge(this.player.loc,
+                                this.player.loc.bottom)) {
+                    this.player.loc = this.player.loc.bottom;
+                }
+                if (s.equals("left")
+                        && this.maze.hasEdge(this.player.loc,
+                                this.player.loc.left)) {
+                    this.player.loc = this.player.loc.left;
+                }
+                if (s.equals("right")
+                        && this.maze.hasEdge(this.player.loc,
+                                this.player.loc.right)) {
+                    this.player.loc = this.player.loc.right;
+                }
+            }
+        }
+    }
+
+    void search() {
+        if (this.nodelist.size() > 0) {
+            Node curr = this.nodelist.get(0);
+            this.nodelist.remove(curr);
+            ArrayList<Edge> neighbors = this.maze.getNeighbors(curr);
+            if (neighbors.size() != 0) {
+                for (Edge e : neighbors) {
+                    if (!this.maze.visited.contains(e)) {
+                        e.color = new Color(115, 224, 240);
+                        this.maze.visited.add(e);
+                        if (e.first.id() == curr.id())
+                            if (this.depth) {
+                                this.nodelist.add(0, e.second);
+                            }
+                            else {
+                                this.nodelist.add(e.second);
+                            }                          
+                        else {
+                            if (this.depth) {
+                                this.nodelist.add(0, e.first);
+                            }
+                            else {
+                                this.nodelist.add(e.first);
+                            }
+                        }                        
+                    }
+                }
+            }
+            if (curr.id() == (Maze.WIDTH * Maze.HEIGHT) - 1) {
+                this.reconstruct();
+                this.gameover = true;
+            }
+        }
+    }
+
+    void reconstruct() {
+        int curId = Maze.WIDTH * Maze.HEIGHT - 1;
+        while (curId != 0) {
+            for (Edge e : this.maze.visited) {
+                if (e.second.id() == curId) {
+                    curId = e.first.id();
+                    e.color = new Color(27, 196, 160);
+                    this.path.add(e);
+                }
+            }
+        }
+    }
+}
+
+class Maze {
+
+    static final int WIDTH = 20;
+    static final int HEIGHT = 20;
+
+    ArrayList<ArrayList<Node>> nodes;
+    HashMap<Integer, Integer> representatives;
+    ArrayList<Edge> edgesInTree;
+    ArrayList<Edge> worklist; // all edges, sorted by weights;
+    ArrayList<Edge> visited;
+
+    Maze() {
+        this.nodes = this.initNodes();
+        this.representatives = this.initRepresentatives();
+        this.worklist = this.initWorklist();
+        this.edgesInTree = new ArrayList<Edge>();
+        if (!MazeWorld.ANIMATE && !MazeWorld.STEPPER) {
+            this.create();
+        }
+        this.relink();
+        this.visited = new ArrayList<Edge>();
+    }
+
+    // every node initially is its own representative
+    HashMap<Integer, Integer> initRepresentatives() {
+        HashMap<Integer, Integer> map = new HashMap<Integer, Integer>();
+        for (ArrayList<Node> arr : nodes) {
+            for (Node n : arr) {
+                map.put(n.id(), n.id());
+            }
+        }
+        return map;
+    }
+
+    // each Node gets its corresponding x and y coordinates
+    ArrayList<ArrayList<Node>> initNodes() {
+        ArrayList<ArrayList<Node>> result = new ArrayList<ArrayList<Node>>();
+        for (int i = 0; i < Maze.HEIGHT; i++) {
+            ArrayList<Node> curr = new ArrayList<Node>();
+            for (int j = 0; j < Maze.WIDTH; j++) {
+                Node c = new Node(j, i);
+                curr.add(c);
+            }
+            result.add(curr);
+        }
+        return result;
+    }
+
+    // sets worklist to contain every edge in the maze
+    ArrayList<Edge> initWorklist() {
+        ArrayList<Edge> result = new ArrayList<Edge>();
+        for (int i = 0; i < Maze.HEIGHT; i++) {
+            for (int j = 0; j < Maze.WIDTH; j++) {
+                if (j < Maze.WIDTH - 1) {
+                    result.add(new Edge(this.nodes.get(i).get(j), this.nodes
+                            .get(i).get(j + 1)));
+                }
+                if (i < Maze.HEIGHT - 1) {
+                    result.add(new Edge(this.nodes.get(i).get(j), this.nodes
+                            .get(i + 1).get(j)));
+                }
+            }
+        }
+        return result;
+    }
+
+    // where the magic happens
+    void create() {
+        int paths = 0;
+        while (paths < (this.nodes.size() * this.nodes.get(0).size()) - 1) {
+            // similar to assigning random weights, we pick a random edge
+            int r = (int) (Math.random() * this.worklist.size());
+            Edge e = this.worklist.get(r);
+
+            int id1 = this.find(representatives, e.first.id());
+            int id2 = this.find(representatives, e.second.id());
+            if (id1 == id2) {
+                this.worklist.remove(e);
+            } else {
+                this.edgesInTree.add(e);
+                this.representatives.put(this.find(representatives, id2), id1);
+                paths++;
+            }
+        }
+    }
+
+    void createByStep() {
+        // basically the create method again
+        int r = (int) (Math.random() * this.worklist.size());
+        Edge e = this.worklist.get(r);
+        int id1 = this.find(representatives, e.first.id());
+        int id2 = this.find(representatives, e.second.id());
+        if (this.edgesInTree.size() < (Maze.HEIGHT * Maze.WIDTH) - 1) {
+            while (id1 == id2) {
+                this.worklist.remove(e);
+                r = (int) (Math.random() * this.worklist.size());
+                e = this.worklist.get(r);
+                id1 = this.find(representatives, e.first.id());
+                id2 = this.find(representatives, e.second.id());
+            }
+            this.edgesInTree.add(e);
+            this.representatives.put(this.find(representatives, id2), id1);
+        }
+    }
+    
+    int find(HashMap<Integer, Integer> map, int key) {
+        if (key == map.get(key)) {
+            return key;
+        } else {
+            return find(map, map.get(key));
+        }
+    }
+
+    // effect
+    void relink() {
+        for (int i = 0; i < Maze.HEIGHT; i++) {
+            for (int j = 0; j < Maze.WIDTH; j++) {
+                Node n = this.nodes.get(i).get(j);
+                if (i == 0) {
+                    n.top = n;
+                    n.bottom = this.nodes.get(i + 1).get(j);
+                } else if (i < Maze.HEIGHT - 1) {
+                    n.top = this.nodes.get(i - 1).get(j);
+                    n.bottom = this.nodes.get(i + 1).get(j);
+                } else {
+                    n.top = this.nodes.get(i - 1).get(j);
+                    n.bottom = n;
+                }
+                if (j == 0) {
+                    n.left = n;
+                    n.right = this.nodes.get(i).get(j + 1);
+                } else if (j < Maze.WIDTH - 1) {
+                    n.left = this.nodes.get(i).get(j - 1);
+                    n.right = this.nodes.get(i).get(j + 1);
+                } else {
+                    n.left = this.nodes.get(i).get(j - 1);
+                    n.right = n;
+                }
+            }
+        }
+    }
+
+    // is there an edge in this maze connecting n1 and n2?
+    boolean hasEdge(Node n1, Node n2) {
+        for (Edge e : this.edgesInTree) {
+            if ((e.first.x == n1.x && e.first.y == n1.y && e.second.x == n2.x && e.second.y == n2.y)
+                    || (e.first.x == n2.x && e.first.y == n2.y
+                            && e.second.x == n1.x && e.second.y == n1.y)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    ArrayList<Edge> getNeighbors(Node n) {
+        ArrayList<Edge> neighbors = new ArrayList<Edge>();
+        for (Edge e : this.edgesInTree) {
+            if (e.first.id() == n.id()) {
+                Node temp = e.first;
+                e.first = e.second;
+                e.second = temp;
+                neighbors.add(e);
+            } 
+            else if (e.second.id() == n.id()) {
+                neighbors.add(e);
+            }
+        }
+        return neighbors;
+    }
+
+    WorldImage draw() {
+        int height = Node.SIZE * Maze.HEIGHT;
+        int width = Node.SIZE * Maze.WIDTH;
+        WorldImage result = new RectangleImage(new Posn(width / 2, height / 2),
+                width, height, new Black());
+        // draw the paths
+        WorldImage curr = result;
+        for (int j = 0; j < (Maze.HEIGHT * Maze.WIDTH / 50); j++) {
+            for (int i = 0; i < 50; i++) {
+                if (i + (50 * j) < this.edgesInTree.size()) {
+                    Edge e = this.edgesInTree.get(i + (50 * j));
+                    curr = new OverlayImages(curr, e.draw());
+                }
+            }
+            result = new OverlayImages(result, curr);
+        }
+
+        return result;
+    }
+
+    int score() {
+        return (int) (((double) this.visited.size() / (Maze.HEIGHT * Maze.WIDTH)) * 100) + 1;
+    }
+
+}
+
+class Edge {
+
+    Node first;
+    Node second;
+    boolean isVertical;
+    Color color;
+
+    Edge(Node first, Node second) {
+        this.first = first;
+        this.second = second;
+        this.isVertical = (first.x - second.x == 0);
+        this.color = new Color(220, 220, 220);
+    }
+
+    WorldImage draw() {
+        double x = (this.first.x + this.second.x) / 2.0;
+        double y = (this.first.y + this.second.y) / 2.0;
+        Posn p = new Posn((int) (x * Node.SIZE) + (Node.SIZE / 2),
+                (int) (y * Node.SIZE) + (Node.SIZE / 2));
+        if (isVertical) {
+            return new RectangleImage(p, Node.SIZE - 2, (2 * Node.SIZE) - 2,
+                    this.color);
+        } else {
+            return new RectangleImage(p, (2 * Node.SIZE) - 2, Node.SIZE - 2,
+                    this.color);
+        }
+    }
+
+    public boolean equals(Object other) {
+        if (other instanceof Edge) {
+            Edge e = (Edge) other;
+            return ((this.first.equals(e.first) && this.second.equals(e.second)) || (this.first
+                    .equals(e.second) && this.second.equals(e.first)));
+        } else
+            return false;
+    }
+}
+
+class Node {
+
+    // for now, stick with even numbers
+    static final int SIZE = 20;
+
+    int x;
+    int y;
+    Node top;
+    Node left;
+    Node bottom;
+    Node right;
+
+    Node(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    int id() {
+        return (y * Maze.WIDTH) + x;
+    }
+
+    // prints each node's id
+    WorldImage drawLabels() {
+        Posn p = new Posn(this.x * Node.SIZE + (Node.SIZE / 2), this.y
+                * Node.SIZE + (Node.SIZE / 2));
+        return new TextImage(p, Integer.toString(this.id()), (Node.SIZE / 3),
+                new Red());
+    }
+
+    WorldImage drawHead() {
+        Posn p = new Posn(this.x * Node.SIZE + (Node.SIZE / 2), this.y
+                * Node.SIZE + (Node.SIZE / 2));
+        return new RectangleImage(p, Node.SIZE - 2, Node.SIZE - 2, new Red());
+    }
+
+    public boolean equals(Object other) {
+        if (other instanceof Node) {
+            Node n = (Node) other;
+            return (this.x == n.x && this.y == n.y);
+        } else
+            return false;
+    }
+}
+
+class Player {
+
+    Node loc;
+
+    Player(Node loc) {
+        this.loc = loc;
+    }
+
+    WorldImage drawAt(WorldImage bg) {
+        Posn p = new Posn(this.loc.x * Node.SIZE + (Node.SIZE / 2), this.loc.y
+                * Node.SIZE + (Node.SIZE / 2));
+        return bg.overlayImages(new OvalImage(p, Node.SIZE - 4, Node.SIZE - 4,
+                new Red()));
+    }
+}
+
+class ExamplesMaze {
+
+    int height = Node.SIZE * Maze.HEIGHT;
+    int width = Node.SIZE * Maze.WIDTH;
+    MazeWorld w;
+
+    void dtestMaze(Tester t) {
+        this.w = new MazeWorld();
+        t.checkExpect(w.maze.representatives.values(), null);
+    }
+
+    void testBigBang(Tester t) {
+        this.w = new MazeWorld();
+        w.bigBang(width, height, .02);
+    }
+
+    void dtestDraw(Tester t) {
+        this.w = new MazeWorld();
+        WorldCanvas c = new WorldCanvas(1600, 1000);
+        while (!w.gameover) {
+            w.play = false;
+            w.depth = true;
+            w.search();
+        }
+        w.reconstruct();
+        t.checkExpect(c.show() && c.drawImage(w.makeImage()), true);
+    }
+
+}
